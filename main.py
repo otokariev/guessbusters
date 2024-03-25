@@ -91,7 +91,7 @@ def register():
 
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+    cursor.execute("SELECT * FROM users WHERE username=:username", {"username": username})
     existing_user = cursor.fetchone()
     if existing_user:
         return jsonify({'message': 'Username already exists'}), 400
