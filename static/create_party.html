@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Создание комнаты</title>
+</head>
+<body>
+    <h1>Создание комнаты</h1>
+    <form action="{{ url_for('get_party', name=name) }}" method="post">
+        <input type="text" name="name" value="{{ name }}" placeholder="Введите имя комнаты">
+        <input type="submit" value="Создать">
+    </form>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Все комнаты</title>
+</head>
+<body>
+    <h1>Все комнаты</h1>
+    <ul>
+        {% for conversation in parties %}
+            <li><a href="{{ url_for('get_party', name=conversation.friendly_name) }}">{{ conversation.friendly_name }}</a></li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Детали комнаты</title>
+</head>
+<body>
+    <h1>{{ conversation.friendly_name }}</h1>
+    <p>SID: {{ conversation.sid }}</p>
+    <p>Дата создания: {{ conversation.date_created }}</p>
+    <p>Участники:</p>
+    <ul>
+        {% for participant in conversation.participants.list() %}
+            <li>{{ participant.identity }}</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
