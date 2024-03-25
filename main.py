@@ -189,6 +189,11 @@ def update_profile():
     user_row = cursor.fetchone()
     if user_row:
         old_username = user_row[0]
+        cursor.execute("SELECT * FROM users WHERE username=?", (new_username,))
+        existing_user = cursor.fetchone()
+        if existing_user:
+            return jsonify({'message': 'New username already exists'}), 400
+
         cursor.execute("UPDATE users SET username=? WHERE username=?", (new_username, old_username))
         cursor.execute("UPDATE sessions SET username=? WHERE session_token=?", (new_username, session_token))
         db.commit()
