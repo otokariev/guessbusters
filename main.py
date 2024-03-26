@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 
 from flask import Flask, render_template, request, abort, jsonify, g
 
+from sqlalchemy import create_engine, Column, String
+from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import sessionmaker
+
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VideoGrant, ChatGrant
 from twilio.rest import Client
@@ -23,7 +27,8 @@ twilio_client = Client(twilio_api_key_sid, twilio_api_key_secret,
                        twilio_account_sid)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key'  #FIXME!
+app.config['SECRET_KEY'] = 'your_secret_key'  # FIXME ADD SECRET KEY!
+Base = declarative_base()
 
 
 ######################################### GET DICTIONARY ##########################################
@@ -54,7 +59,23 @@ def get_word():
         return jsonify({english: russian})
 
 
+########################################### USER MODEL SQLALCHEMY ################################################
+
+
+# class User(Base):
+#     __tablename__ = 'users'
+#     username = Column(String, primary_key=True)
+#     password = Column(String)
+
+
+########################################### SESSION MODEL SQLALCHEMY ################################################
+
+
+#
+
+
 ########################################### DB CONNECT ################################################
+########################################### WITH NO SQLALCHEMY ########################################
 
 
 def get_db():
@@ -62,6 +83,14 @@ def get_db():
     if db is None:
         db = g._database = sqlite3.connect('database.db')
     return db
+
+
+########################################### WITH SQLALCHEMY ###########################################
+
+
+# engine = create_engine('sqlite:///database.db')
+# Base.metadata.create_all(engine)
+# Session = sessionmaker(bind=engine)
 
 
 ########################################### HASH PASSWORD ################################################
@@ -72,6 +101,7 @@ def hash_password(password):
 
 
 ########################################### REGISTER ################################################
+########################################### WITH NO SQLALCHEMY ######################################
 
 
 @app.route('/register', methods=['POST'])
@@ -91,7 +121,7 @@ def register():
 
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT * FROM users WHERE username=:username", {"username": username})
+    cursor.execute("SELECT * FROM users WHERE username=?", (username,))
     existing_user = cursor.fetchone()
     if existing_user:
         return jsonify({'message': 'Username already exists'}), 400
@@ -99,6 +129,38 @@ def register():
     cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
     db.commit()
     return jsonify({'message': 'User registered successfully'}), 201
+
+
+########################################### WITH SQLALCHEMY ##########################################
+
+
+# @app.route('/register', methods=['POST'])
+# def register():
+#     data = request.get_json()
+#     username = data.get('username')
+#     password = data.get('password')
+#     confirm_password = data.get('confirm_password')
+#
+#     if not username or not password or not confirm_password:
+#         return jsonify({'message': 'All fields are required'}), 400
+#
+#     if password != confirm_password:
+#         return jsonify({'message': 'Passwords do not match'}), 400
+#
+#     hashed_password = hash_password(password)
+#
+#     session = Session()
+#     existing_user = session.query(User).filter_by(username=username).first()
+#     if existing_user:
+#         session.close()
+#         return jsonify({'message': 'Username already exists'}), 400
+#
+#     new_user = User(username=username, password=hashed_password)
+#     session.add(new_user)
+#     session.commit()
+#     session.close()
+#
+#     return jsonify({'message': 'User registered successfully'}), 201
 
 
 ########################################### LOGIN ################################################
@@ -121,7 +183,7 @@ def temp_login():
     user = cursor.fetchone()
 
 
-    ########################################### CREATE SESSION TOKEN ################################################
+########################################### CREATE SESSION TOKEN ################################################
 
 
     if user:
@@ -136,7 +198,7 @@ def temp_login():
 ########################################### LOGOUT ################################################
 
 
-@app.route('/logout', methods=['POST'])
+@app.route('/logout', methods=['DELETE'])
 def logout():
     session_token = request.headers.get('Authorization')
 
@@ -189,11 +251,6 @@ def update_profile():
     user_row = cursor.fetchone()
     if user_row:
         old_username = user_row[0]
-        cursor.execute("SELECT * FROM users WHERE username=?", (new_username,))
-        existing_user = cursor.fetchone()
-        if existing_user:
-            return jsonify({'message': 'New username already exists'}), 400
-
         cursor.execute("UPDATE users SET username=? WHERE username=?", (new_username, old_username))
         cursor.execute("UPDATE sessions SET username=? WHERE session_token=?", (new_username, session_token))
         db.commit()
@@ -202,92 +259,91 @@ def update_profile():
         return jsonify({'message': 'Invalid session token'}), 401
 
 
-########################################### GET ALL ROOMS ################################################
+########################################### GET ALL PARTIES ######################################
 
 
-@app.route('/rooms', methods=['GET'])
-def get_all_rooms():
-    # Здесь должна быть реализация получения списка всех комнат
-    return jsonify({'message': 'List of all rooms'}), 200
+@app.route("/party", methods=["GET"])
+def get_party():
+    try:
+        conversations = twilio_client.conversations.conversations.list()
+
+        if not conversations:
+            return jsonify({"message": "There are no parties found."}), 404
+
+        parties_list = []
+        for conversation in conversations:
+            parties_list.append({
+                "party_sid": conversation.sid,
+                "party_name": conversation.friendly_name
+            })
+
+        return jsonify({"parties": parties_list})
+
+    except TwilioRestException as e:
+        return jsonify({"message": f"Error retrieving party: {e}"}), 500
 
 
-########################################### CREATE ROOM ################################################
+########################################### GET PARTY BY SID ######################################
 
 
-@app.route('/rooms', methods=['POST'])
-def create_room():
-    # Здесь должна быть реализация создания новой комнаты
-    return jsonify({'message': 'Room created successfully'}), 201
+@app.route('/party/<party_sid>', methods=['GET'])
+def get_party_by_sid(party_sid):
+    try:
+        conversation = twilio_client.conversations.conversations(party_sid).fetch()
+
+        if not conversation:
+            return jsonify({"message": f"Party with sid '{party_sid}' not found."}), 404
+
+        conversation_data = {
+            "party_sid": conversation.sid,
+            "party_name": conversation.friendly_name,
+        }
+
+        return jsonify(conversation_data)
+
+    except TwilioRestException as e:
+        return jsonify({"message": f"Error retrieving party: {e}"}), 500
 
 
-########################################### DELETE ROOM ################################################
+########################################### CREATE PARTY ################################################
 
 
-@app.route('/rooms/<int:room_id>', methods=['DELETE'])
-def delete_room(room_id):
-    # Здесь должна быть реализация удаления комнаты
-    return jsonify({'message': 'Room deleted successfully'}), 200
+@app.route('/party', methods=['POST'])
+def create_party():
+    try:
+        data = request.get_json()
+        party_name = data.get('party_name')
+
+        party_object = twilio_client.conversations.v1.conversations.create(
+            friendly_name=party_name)
+
+        return jsonify({
+            'party_sid': party_object.sid,
+            'party_name': party_object.friendly_name,
+            'message': 'Party created successfully'
+        }), 201
+
+    except TwilioRestException as e:
+        return jsonify({"message": f"Error retrieving party: {e}"}), 500
 
 
-########################################### CREATE PARTY TWILIO ############################################
+########################################### DELETE PARTY BY SID ################################################
 
 
-# @app.route('/create_party', methods=['POST'])
-# def create_party(party_name):
-#     for conversation in twilio_client.conversations.v1.conversations.stream():
-#         if conversation.friendly_name == party_name:
-#             return jsonify({"error": "Party with this name already exists."}), 409
-#
-#     new_conversation = twilio_client.conversations.v1.conversations.create(
-#         friendly_name=party_name)
-#
-#     room_data = {
-#         "sid": new_conversation.sid,
-#         "friendly_name": new_conversation.friendly_name,
-#     }
-#
-#     return jsonify(room_data), 201
+@app.route('/party/<party_sid>', methods=['DELETE'])
+def delete_party_by_sid(party_sid):
+    try:
+        conversation = twilio_client.conversations.conversations(party_sid).fetch()
 
+        if not conversation:
+            return jsonify({"message": "There are no parties found."}), 404
 
-########################################### GET ALL PARTIES TWILIO ############################################
+        conversation.delete()
 
+        return jsonify({"success": True, "message": f"The party with sid '{party_sid}' has been deleted successfully."})
 
-# @app.route('/get_all_parties', methods=['GET'])
-# def get_all_parties():
-#     all_conversations = list(twilio_client.conversations.v1.conversations.stream())
-#
-#     if not all_conversations:
-#         return jsonify({'message': 'There are no parties created at this moment.'}), 200
-#
-#     party_data = []
-#     for conversation in all_conversations:
-#         party_data.append({
-#             'sid': conversation.sid,
-#             'friendly_name': conversation.friendly_name,
-#         })
-#
-#     return jsonify({'parties': party_data}), 200
-
-
-########################################### ADD PLAYER IN PARTY TWILIO #######################################
-
-
-# @app.route('/add_player', methods=['POST'])
-# def add_player(username, party_name):
-#     if not username:
-#         abort(401)
-#
-#     try:
-#         party_name.participants.create(identity=username)
-#     except TwilioRestException as exc:
-#         if exc.status != 409:
-#             raise
-
-
-# @app.route('/join_party/<party_sid>', methods=['GET'])
-# def join_party(party_sid):
-#     # Здесь вы должны добавить код для подключения к выбранной комнате (party_sid)
-#     return "Joining party with SID: {}".format(party_sid)
+    except TwilioRestException as e:
+        return jsonify({"message": f"Error retrieving party: {e}"}), 500
 
 
 ########################################## GET MAIN PAGE #########################################
@@ -301,7 +357,7 @@ def index():
 ########################################## CREATE/GET NEW ROOM TWILIO ####################################
 
 
-def get_party(name):
+def get_room(name):
     for conversation in twilio_client.conversations.v1.conversations.stream():
         if conversation.friendly_name == name:
             return conversation
@@ -319,7 +375,7 @@ def login():
     if not username:
         abort(401)
 
-    conversation = get_party('My Room')
+    conversation = get_room('My Room')
     try:
         conversation.participants.create(identity=username)
     except TwilioRestException as exc:
@@ -341,10 +397,4 @@ def login():
 
 
 if __name__ == '__main__':
-    with app.app_context():
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT)")
-        cursor.execute("CREATE TABLE IF NOT EXISTS sessions (username TEXT, session_token TEXT PRIMARY KEY)")
-        db.commit()
     app.run(debug=True)
