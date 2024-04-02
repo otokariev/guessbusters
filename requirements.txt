@@ -3,3 +3,4 @@ python-dotenv
 twilio
 uuid
 SQLAlchemy
+Flask-CORS

@@ -8,6 +8,7 @@ import uuid
 from dotenv import load_dotenv
 
 from flask import Flask, render_template, request, abort, jsonify, g
+from flask_cors import CORS
 
 from sqlalchemy import create_engine, Column, String
 from sqlalchemy.orm import declarative_base
@@ -27,6 +28,8 @@ twilio_client = Client(twilio_api_key_sid, twilio_api_key_secret,
                        twilio_account_sid)
 
 app = Flask(__name__)
+CORS(app)
+# cors = CORS(app, resources={r"/*": {"origins": "https://example.com"}})
 app.config['SECRET_KEY'] = 'your_secret_key'  # FIXME ADD SECRET KEY!
 Base = declarative_base()
 
@@ -107,11 +110,16 @@ def hash_password(password):
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
+    email = data.get('email')
     username = data.get('username')
     password = data.get('password')
     confirm_password = data.get('confirm_password')
 
-    if not username or not password or not confirm_password:
+    if (
+            not username
+            or not password
+            or not confirm_password
+            or not email):
         return jsonify({'message': 'All fields are required'}), 400
 
     if password != confirm_password:
@@ -121,12 +129,19 @@ def register():
 
     db = get_db()
     cursor = db.cursor()
+
     cursor.execute("SELECT * FROM users WHERE username=?", (username,))
     existing_user = cursor.fetchone()
     if existing_user:
         return jsonify({'message': 'Username already exists'}), 400
 
-    cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+    cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+    existing_email = cursor.fetchone()
+    if existing_email:
+        return jsonify({'message': 'Email already exists'}), 400
+
+    cursor.execute("INSERT INTO users (username, password, email) VALUES (?, ?, ?)",
+                   (username, hashed_password, email))
     db.commit()
     return jsonify({'message': 'User registered successfully'}), 201
 
@@ -224,10 +239,17 @@ def get_profile():
 
     db = get_db()
     cursor = db.cursor()
+
     cursor.execute("SELECT username FROM sessions WHERE session_token=?", (session_token,))
     user = cursor.fetchone()
-    if user:
-        return jsonify({'username': user[0]}), 200
+
+    cursor.execute("SELECT email FROM users WHERE username=?", (user))
+    email = cursor.fetchone()
+    if user and email:
+        return jsonify({
+            'username': user[0],
+            'email': email[0]
+        }), 200
     else:
         return jsonify({'message': 'Unauthorized'}), 401
 
@@ -240,23 +262,35 @@ def update_profile():
     session_token = request.headers.get('Authorization')
     data = request.get_json()
     new_username = data.get('new_username')
+    new_email = data.get('new_email')
 
-    if not session_token or not new_username:
-        return jsonify({'message': 'Missing session token or new username'}), 400
+    if not session_token:
+        return jsonify({'message': 'Missing session token'}), 400
 
     db = get_db()
     cursor = db.cursor()
 
-    cursor.execute("SELECT username FROM sessions WHERE session_token=?", (session_token,))
-    user_row = cursor.fetchone()
-    if user_row:
-        old_username = user_row[0]
+    cursor.execute("SELECT username, email FROM sessions WHERE session_token=?", (session_token,))
+    user_data = cursor.fetchone()
+
+    if not user_data:
+        return jsonify({'message': 'Invalid session token'}), 401
+
+    old_username, old_email = user_data
+
+    if new_username and new_email:
+        cursor.execute("UPDATE users SET username=?, email=? WHERE username=?", (new_username, new_email, old_username))
+        cursor.execute("UPDATE sessions SET username=?, email=? WHERE session_token=?",
+                       (new_username, new_email, session_token))
+    elif new_username:
         cursor.execute("UPDATE users SET username=? WHERE username=?", (new_username, old_username))
         cursor.execute("UPDATE sessions SET username=? WHERE session_token=?", (new_username, session_token))
-        db.commit()
-        return jsonify({'message': 'Profile updated successfully'}), 200
-    else:
-        return jsonify({'message': 'Invalid session token'}), 401
+    elif new_email:
+        cursor.execute("UPDATE users SET email=? WHERE email=?", (new_email, old_email))
+        cursor.execute("UPDATE sessions SET email=? WHERE session_token=?", (new_email, session_token))
+
+    db.commit()
+    return jsonify({'message': 'Profile updated successfully'}), 200
 
 
 ########################################### GET ALL PARTIES ######################################
