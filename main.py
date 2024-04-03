@@ -142,8 +142,16 @@ def register():
 
     cursor.execute("INSERT INTO users (username, password, email) VALUES (?, ?, ?)",
                    (username, hashed_password, email))
+
+    cursor.execute("SELECT id, username, email FROM users WHERE username=?", (username,))
+    user_data = cursor.fetchone()
+
     db.commit()
-    return jsonify({'message': 'User registered successfully'}), 201
+    return jsonify({
+        'message': 'User registered successfully',
+        'user_id': user_data[0],
+        'username': user_data[1],
+        'email': user_data[2]}), 201
 
 
 ########################################### WITH SQLALCHEMY ##########################################
@@ -240,16 +248,21 @@ def get_profile():
     db = get_db()
     cursor = db.cursor()
 
-    cursor.execute("SELECT username FROM sessions WHERE session_token=?", (session_token,))
+    cursor.execute("SELECT username, session_token FROM sessions WHERE session_token=?", (session_token,))
     user = cursor.fetchone()
 
-    cursor.execute("SELECT email FROM users WHERE username=?", (user))
-    email = cursor.fetchone()
-    if user and email:
+    username, session_token = user
+
+    if not session_token:
+        return jsonify({'message': 'Invalid session token'}), 401
+
+    cursor.execute("SELECT id, username, email FROM users WHERE username=?", (username, ))
+    user_data = cursor.fetchone()
+    if user_data:
         return jsonify({
-            'username': user[0],
-            'email': email[0]
-        }), 200
+            'user_id': user_data[0],
+            'username': user_data[1],
+            'email': user_data[2]}), 201
     else:
         return jsonify({'message': 'Unauthorized'}), 401
 
@@ -261,7 +274,6 @@ def get_profile():
 def update_profile():
     session_token = request.headers.get('Authorization')
     data = request.get_json()
-    new_username = data.get('new_username')
     new_email = data.get('new_email')
 
     if not session_token:
@@ -270,24 +282,18 @@ def update_profile():
     db = get_db()
     cursor = db.cursor()
 
-    cursor.execute("SELECT username, email FROM sessions WHERE session_token=?", (session_token,))
-    user_data = cursor.fetchone()
+    cursor.execute("SELECT session_token FROM sessions WHERE session_token=?", (session_token,))
+    session_token = cursor.fetchone()
 
-    if not user_data:
+    if not session_token:
         return jsonify({'message': 'Invalid session token'}), 401
 
-    old_username, old_email = user_data
+    cursor.execute("SELECT email FROM users")
+    email = cursor.fetchone()
+    old_email = email[0]
 
-    if new_username and new_email:
-        cursor.execute("UPDATE users SET username=?, email=? WHERE username=?", (new_username, new_email, old_username))
-        cursor.execute("UPDATE sessions SET username=?, email=? WHERE session_token=?",
-                       (new_username, new_email, session_token))
-    elif new_username:
-        cursor.execute("UPDATE users SET username=? WHERE username=?", (new_username, old_username))
-        cursor.execute("UPDATE sessions SET username=? WHERE session_token=?", (new_username, session_token))
-    elif new_email:
-        cursor.execute("UPDATE users SET email=? WHERE email=?", (new_email, old_email))
-        cursor.execute("UPDATE sessions SET email=? WHERE session_token=?", (new_email, session_token))
+    if new_email:
+        cursor.execute("UPDATE users SET email=? WHERE email=?", (new_email, old_email, ))
 
     db.commit()
     return jsonify({'message': 'Profile updated successfully'}), 200
@@ -432,3 +438,5 @@ def login():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+# DELETE FROM sqlite_sequence WHERE name='users';
